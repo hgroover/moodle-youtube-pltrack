@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="mod/ytpltrack/db" VERSION="20170705" COMMENT="XMLDB file for Moodle mod/ytpltrack"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
+>
+  <TABLES>
+    <TABLE NAME="ytpltrack" COMMENT="Instances of Youtube playlist activity">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="creator" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="FK -&amp;gt; user.id"/>
+        <FIELD NAME="course" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="FK -&amp;gt; course.id"/>
+        <FIELD NAME="created" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Timestamp when created"/>
+        <FIELD NAME="modified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Timestamp when last modified"/>
+        <FIELD NAME="title" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Title to display when playing"/>
+        <FIELD NAME="description" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Optional detailed description to show when playing"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="ytpltrack_options" COMMENT="Global and per-instance options for tracked viewing instances">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="instance" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="-1" SEQUENCE="false" COMMENT="FK -&amp;gt; ytpltrack.id or -1 for global"/>
+        <FIELD NAME="optname" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Variable name of option"/>
+        <FIELD NAME="optvalue" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Option value"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="ytpltrack_views" COMMENT="Master record for view of an activity instance by a user">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="instance" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="FK -&amp;gt; ytpltrack.id"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="FK -&amp;gt; user.id"/>
+        <FIELD NAME="firstupdate" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When first update occurred"/>
+        <FIELD NAME="lastupdate" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When most recent update occurred"/>
+        <FIELD NAME="countraw" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Raw count of entries in playlist, including those for which metadata has not yet been received"/>
+        <FIELD NAME="countfull" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Count of videos in playlist for which metadata (video id, duration) has been received"/>
+        <FIELD NAME="totalviewed" TYPE="number" LENGTH="10" NOTNULL="false" SEQUENCE="false" DECIMALS="2" COMMENT="Total number of seconds spent viewing videos in this playlist"/>
+        <FIELD NAME="totalduration" TYPE="number" LENGTH="10" NOTNULL="false" SEQUENCE="false" DECIMALS="2" COMMENT="Total duration of videos in this playlist, in seconds"/>
+        <FIELD NAME="totalcapped" TYPE="number" LENGTH="10" NOTNULL="false" SEQUENCE="false" DECIMALS="2" COMMENT="Total number of seconds spent watching videos in this playlist, capped at the duration of each video (does not count time spent replaying an individual video)"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="ytpltrack_viewdetails" COMMENT="Stats on viewing an individual video">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="viewid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="FK -&amp;gt; ytpltrack_views.id"/>
+        <FIELD NAME="videoid" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="YouTube video ID or raw URL if unable to decode"/>
+        <FIELD NAME="pausecount" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Number of times video paused while playing"/>
+        <FIELD NAME="duration" TYPE="number" LENGTH="10" NOTNULL="false" SEQUENCE="false" DECIMALS="2" COMMENT="Duration of this video in seconds, as reported by the last update"/>
+        <FIELD NAME="viewed" TYPE="number" LENGTH="10" NOTNULL="false" SEQUENCE="false" DECIMALS="2" COMMENT="Number of seconds spent viewing this video"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+    </TABLE>
+  </TABLES>
+</XMLDB>
