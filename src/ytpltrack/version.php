@@ -15,18 +15,23 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
  
 /**
+ * Defines the version and other meta-info about the plugin
+ *
+ * Setting the $plugin->version to 0 prevents the plugin from being installed.
+ * See https://docs.moodle.org/dev/version.php for more info.
+ *
  * @package   mod_ytpltrack
  * @copyright 2017 Henry Groover <henry.groover@gmail.com>
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v2 or later
  */
  
 defined('MOODLE_INTERNAL') || die();
- 
-$plugin->version   = 2017070401;
+
+$plugin->version   = 2017071001;
 $plugin->requires  = 2014111000; // Moodle 2.8 - tested with 3.1 (2016052300)
 $plugin->cron      = 0;
 $plugin->component = 'mod_ytpltrack';
-$plugin->maturity  = MATURITY_STABLE;
+$plugin->maturity  = MATURITY_ALPHA;
 $plugin->release   = '3.0';
  
 $plugin->dependencies = array(
