@@ -82,6 +82,10 @@ $debug = 0;
 	<div id="stats" style="font-size:8pt;"><?php
 	// Summarize existing stats, if any
 	$yviews = $DB->get_records_sql( "SELECT * FROM mdl_ytpltrack_views WHERE instance = :instance AND userid = :uid", array( "instance" => $instanceid, "uid" => $USER->id ) );
+	// These will be used later to initialize Javascript
+	global $yvdetails, $fk;
+	$yvdetails = array();
+	$fk = "";
 	if (sizeof($yviews) < 1)
 	{
 		printf( "<p>(no viewing progress recorded yet)</p>" );
@@ -123,7 +127,7 @@ $debug = 0;
 				{
 					printf( "<td>&nbsp;</td>" );
 				}
-				printf( "<td>%s</td>", $yvdetails[$key]->pausecount );
+				printf( "<td style='text-align:right;'>%s</td>", $yvdetails[$key]->pausecount );
 				print( "</tr>\n" );
 			}
 			print( "</tbody></table>" );
@@ -155,8 +159,28 @@ $debug = 0;
 	  var g_dbg = <?php print $debug; ?>;
 	  var g_instance = <?php print $instanceid; ?>;
 	  var g_ended = 0;
+	  var g_updateCountdown = 60; // Countdown in seconds to next update
+	  var g_updateInterval = 60; // Interval in seconds between updates
 	  function setDebug(add) {
 		  if (g_dbg + add >= 0) g_dbg += add;
+	  }
+	  // Accelerate next update to take place in specified number of seconds
+	  function accelerateTo(seconds) {
+		  if (g_updateCountdown > seconds + 1)
+		  {
+			  g_updateCountdown = seconds;
+		  }
+	  }
+	  // Interval handler
+	  function onSecondTick() {
+		  if (g_updateCountdown <= 0)
+		  {
+			  g_updateCountdown = g_updateInterval;
+			  updateStats();
+			  g_updateCountdown = g_updateInterval;
+			  return;
+		  }
+		  g_updateCountdown--;
 	  }
       function onYouTubeIframeAPIReady() {
         // Example was: M7lc1UVf-VE
@@ -187,10 +211,6 @@ $debug = 0;
       //    the player should play for six seconds and then stop.
       var done = false;
       function onPlayerStateChange(event) {
-        //if (event.data == YT.PlayerState.PLAYING && !done) {
-         // setTimeout(stopVideo, 6000);
-        //  done = true;
-        //}
 		if (event.data == YT.PlayerState.ENDED)
 		{
 			// We apparently get this AFTER the current playlist index has switched, 
@@ -205,6 +225,8 @@ $debug = 0;
 				// We will, apparently, get the playing event.
 				//playlistTimes[lastPlaylist].push(0-(new Date()).getTime());
 			}
+			// Perform stats update in 2 seconds
+			accelerateTo( 2 );
 		}
 		else if (event.data == YT.PlayerState.PLAYING)
 		{
@@ -233,6 +255,7 @@ $debug = 0;
 			logmsg( "paused " + lastPlaylist );
 			playlistTimes[lastPlaylist].push((new Date()).getTime());
 			playlistPause[lastPlaylist]++;
+			accelerateTo( 3 );
 		}
 		else if (event.data == YT.PlayerState.BUFFERING)
 		{
@@ -306,7 +329,8 @@ $debug = 0;
 			  s += "</a>";
 			  s += "</td>";
 			  s += "<td>";
-			  s += playlistDuration[n];
+			  //s += playlistDuration[n];
+			  s += SecondsToHMS( playlistDuration[n] );
 			  s += "</td>";
 			  if (n) postData += ',';
 			  postData += n;
@@ -317,7 +341,7 @@ $debug = 0;
 			  postData += ',';
 			  postData += playlistDuration[n];
 			  postData += ',';
-			  var totalPlayedMS = 0;
+			  var totalPlayedMS = playlistPreviousTimes[n] * 1000;
 			  var m;
 			  var sDbg;
 			  sDbg = '[' + n + ']:';
@@ -342,14 +366,15 @@ $debug = 0;
 			  postData += (totalPlayedMS/1000.0).toFixed(3);
 			  s += "<td>";
 			  if (g_dbg > 1) logmsg(sDbg);
-			  s += (totalPlayedMS/1000.0);
+			  //s += (totalPlayedMS/1000.0);
+			  s += SecondsToHMS( totalPlayedMS/1000 );
 			  s += "</td>";
 			  var pct = 0;
 			  if (playlistDuration[n] > 0) pct = 0.1 * totalPlayedMS / playlistDuration[n];
 			  s += "<td>";
 			  s += pct.toFixed(2);
 			  s += " %</td>";
-			  s += "<td>";
+			  s += "<td style='text-align:right;'>";
 			  s += playlistPause[n];
 			  s += "</td>";
 			  s += "</tr>";
@@ -367,21 +392,23 @@ $debug = 0;
 			function(data, status){
 				logmsg("Data: " + data + "\nStatus: " + status);
 			});
-		  setTimeout( updateStats, 60000 );
 	  }
 	  // Get info on current playlist entry
 	  function getCurrentInfo(p) {
 		  var n = p.getPlaylistIndex();
-		  if (playlistUrl[n]=='')
+		  var id = p.getVideoUrl();
+		  if (playlistUrl[n]=='' || (id != '' && playlistUrl[n] != id))
 		  {
-			logmsg("url[" + n + "]:" + p.getVideoUrl());
-			playlistUrl[n] = p.getVideoUrl();
+			logmsg("url[" + n + "]:" + id);
+			playlistUrl[n] = id;
 		  }
 		  if (playlistDuration[n]==0)
 		  {
 			logmsg("duration:" + p.getDuration());
 			playlistDuration[n] = p.getDuration();
 		  }
+		  // Update status in 2 seconds
+		  accelerateTo( 2 );
 	  }
 	  
 	  // Retrieve playlist
@@ -390,7 +417,21 @@ $debug = 0;
 	  var playlistPause = []; // Array of pause counts for each playlist entry
 	  var playlistUrl = []; // Array of video URLs
 	  var playlistDuration = []; // Array of durations
+	  var playlistPreviousTimes = []; // Array of previously played times in seconds
 	  var g_latestIndex = -1; // Latest playlist index referenced
+	  <?php
+	  // Inject previous playtimes along with video IDs
+	  if ($fk != "" && sizeof($yvdetails) > 0)
+		  for ($n = 0; $n < sizeof($yvdetails); $n++)
+		  {
+			  $key = array_keys($yvdetails)[$n];
+			  printf( "playlistUrl.push('%s');\n\t", $yvdetails[$key]->videoid );
+			  printf( "playlistPreviousTimes.push(%.0f);\n\t", $yvdetails[$key]->viewed );
+			  printf( "playlistDuration.push(%.0f);\n\t", $yvdetails[$key]->duration );
+			  printf( "playlistPause.push(%d);\n\t", $yvdetails[$key]->pausecount );
+			  print( "playlistTimes.push([]);\n\t" );
+		  }
+	  ?>
 	  function getPlaylistInfo()
 	  {
 		  playlist = player.getPlaylist();
@@ -405,29 +446,56 @@ $debug = 0;
 				  playlistPause.push(0);
 				  playlistUrl.push('');
 				  playlistDuration.push(0);
+				  playlistPreviousTimes.push(0);
 			  }
 		  }
 		  // We are playing, record start time
 		  playlistTimes[player.getPlaylistIndex()].push(0-(new Date()).getTime());
-		  // Start stats update. First one after 1 minute, every minute after that
-		  setTimeout( updateStats, 60000 );
+		  // Start stats update heartbeat
+		  setInterval( onSecondTick, 1000 );
+		  accelerateTo( 2 );
 	  }
       function stopVideo() {
 		  logmsg("Stopped");
         player.stopVideo();
       }
-	  function logmsg(s)
+	  function _logmsg(s)
 	  {
-		  if (g_dbg <= 0) return;
+		  // Unconditionally log message
 		  var dbg = document.getElementById('debug');
 		  var html = dbg.innerHTML + '<p>' + s + '</p>';
 		  dbg.innerHTML = html;
+	  }
+	  function logmsg(s)
+	  {
+		  if (g_dbg <= 0) return;
+		  _logmsg(s);
 	  }
 	  function onPlayerPlaybackQualityChange(event) {
 		  logmsg("Playback quality changed: " + event.data);
 	  }
 	  function onPlayerError(event) {
-		  logmsg("Player error:" + event.data);
+		  _logmsg("Player error:" + event.data);
+	  }
+	  
+	  // Convert seconds to [h:]m:ss string
+	  function SecondsToHMS( nseconds )
+	  {
+		  var minutes = Math.floor(Math.round(nseconds) / 60);
+		  var hours = Math.floor(minutes / 60);
+		  var seconds = Math.round(nseconds) % 60;
+		  var s = '';
+		  if (hours > 0)
+		  {
+			  s += hours;
+			  s += ':';
+		  }
+		  if (hours > 0 && minutes < 10) s += '0';
+		  s += minutes;
+		  s += ':';
+		  if (seconds < 10) s += '0';
+		  s += seconds;
+		  return s;
 	  }
     </script>
 <?php
@@ -437,13 +505,6 @@ echo $OUTPUT->footer();
 
 function SecondsToHMS( $nseconds )
 {
-	/***
-	$now = time();
-	$then = $now + $nseconds;
-	$interval = date_diff( date_create("@{$now}"), date_create("@{$then}") );
-	if ($nseconds >= 3600) return $interval->format( "%h:%i:%s" );
-	else return $interval->format("%i:%s");
-	**/
 	$minutes = ((int)$nseconds) / 60;
 	$hours = $minutes / 60;
 	$seconds = $nseconds % 60;
