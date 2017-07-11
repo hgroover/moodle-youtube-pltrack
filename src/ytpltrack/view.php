@@ -154,6 +154,7 @@ $debug = 0;
 	  var g_playlist = '<?php print $playlist; ?>';
 	  var g_dbg = <?php print $debug; ?>;
 	  var g_instance = <?php print $instanceid; ?>;
+	  var g_ended = 0;
 	  function setDebug(add) {
 		  if (g_dbg + add >= 0) g_dbg += add;
 	  }
@@ -195,23 +196,19 @@ $debug = 0;
 			// We apparently get this AFTER the current playlist index has switched, 
 			// iff (if and only if) we allowed the previous entry to play to completion,
 			// so we need to update the previous playlist end time before starting this one
-			var lastPlaylist = event.target.getPlaylistIndex();
-			if (lastPlaylist < 0 && g_latestIndex >= 0) lastPlaylist = g_latestIndex;
-			else if (lastPlaylist >= 0) g_latestIndex = lastPlaylist;
-			logmsg("ended:" + lastPlaylist);
-			if (lastPlaylist > 0)
+			g_ended = 2 + 1; // Number of remaining updates (2)
+			var lastPlaylist = g_latestIndex;
+			logmsg("ended:" + lastPlaylist );
+			if (lastPlaylist >= 0)
 			{
-				playlistTimes[lastPlaylist-1].push((new Date()).getTime());
+				playlistTimes[lastPlaylist].push((new Date()).getTime());
 				// We will, apparently, get the playing event.
 				//playlistTimes[lastPlaylist].push(0-(new Date()).getTime());
-			}
-			else
-			{
-				playlistTimes[lastPlaylist].push((new Date()).getTime());				
 			}
 		}
 		else if (event.data == YT.PlayerState.PLAYING)
 		{
+			g_ended = 0;
 			if (null == playlist) 
 			{
 				logmsg( "playing first" );
@@ -229,6 +226,7 @@ $debug = 0;
 		}
 		else if (event.data == YT.PlayerState.PAUSED)
 		{
+			g_ended = 0;
 			var lastPlaylist = event.target.getPlaylistIndex();
 			if (lastPlaylist < 0 && g_latestIndex >= 0) lastPlaylist = g_latestIndex;
 			else if (lastPlaylist >= 0) g_latestIndex = lastPlaylist;
@@ -239,10 +237,12 @@ $debug = 0;
 		else if (event.data == YT.PlayerState.BUFFERING)
 		{
 			logmsg( "buffering " + event.target.getPlaylistIndex() );
+			g_ended = 0;
 		}
 		else if (event.data == -1)
 		{
 			logmsg( "unstarted " + event.target.getPlaylistIndex() + " latest " + g_latestIndex );
+			g_ended = 0;
 			// If we got here by the skip playlist button (->|) there will have been
 			// no end event for the previous video, so we need to ensure that it has
 			// an end. If it was still playing (and was not paused) we'll have an
@@ -281,6 +281,11 @@ $debug = 0;
 	  // Update stats
 	  function updateStats()
 	  {
+		  if (g_ended > 0)
+		  {
+			  if (g_ended == 1) return;
+			  g_ended--;
+		  }
 		  var divStats = document.getElementById("stats");
 		  var s = "<table border='0'><thead><tr><th>#</th><th>ID</th><th>Duration</th><th>Total played</th><th>Pct</th><th>Times paused</th></tr></thead>";
 		  s += "<tbody>";
