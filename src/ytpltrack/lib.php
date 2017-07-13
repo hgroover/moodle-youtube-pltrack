@@ -26,10 +26,12 @@ function ytpltrack_supports($feature) {
 
     switch($feature) {
         case FEATURE_MOD_INTRO:
-            return true;
         case FEATURE_SHOW_DESCRIPTION:
-            return true;
         case FEATURE_GRADE_HAS_GRADE:
+		case FEATURE_COMPLETION_TRACKS_VIEWS:
+		//case FEATURE_GROUPS:
+		//case FEATURE_GROUPINGS:
+		//case FEATURE_GROUPMEMBERSONLY:
             return true;
         case FEATURE_BACKUP_MOODLE2:
             return false;
@@ -106,22 +108,27 @@ function ytpltrack_delete_instance($id) {
     }
 
     // Delete dependent records from ytpltrack_views, ytpltrack_viewdetails
+	$yviews = $DB->get_records_sql( "SELECT id FROM mdl_ytpltrack_views WHERE instance = :instance", array( "instance" => $id ) );
+	foreach ($yviews as $key => $value)
+	{
+		$DB->delete_records_select( 'ytpltrack_viewdetails', "viewid = ?", array( $value->id ) );
+	}
 
-    //$DB->delete_records('ytpltrack', array('id' => $ytpltrack->id));
+	$DB->delete_records_select( 'ytpltrack_views', 'instance = ?', array( $id ) );
+	
+    $DB->delete_records('ytpltrack', array('id' => $id));
 
-    //ytpltrack_grade_item_delete($ytpltrack);
+    ytpltrack_grade_item_delete($ytpltrack);
 
     return true;
 }
-
-// Many more functions are defined...
-// Since we've pulled in grading by default, we do need pretty much all of these. 
-// Fortunately newmodule stubs them all out...
 
 /**
  * Returns a small object with summary information about what a
  * user has done with a given particular instance of this module
  * Used for user activity reports.
+ * (Shown in user profile, reports, outline report, only for sitewide
+ * instances not associated with a specific course)
  *
  * $return->time = the time they did it
  * $return->info = a short text description
@@ -133,16 +140,40 @@ function ytpltrack_delete_instance($id) {
  * @return stdClass|null
  */
 function ytpltrack_user_outline($course, $user, $mod, $ytpltrack) {
-
+// Other tables: mdl_course_modules.id is the id passed to view.php, mdl_course_modules.instance => mdl_ytpltrack.id
+// $course is a record from mdl_course: id, category, fullname, shortname, summary, summaryformat
+// $user is a record from mdl_user: id, username, firstname, lastname, email, city, country, lang, timezone, etc.
+// $mod is a record from mdl_course_modules: id, course, module, instance, section, etc.
+// SELECT y.course, y.playlist, y.name, v.id, v.instance, v.userid, v.lastupdate, v.countfull, v.countraw, v.totalcapped, v.totalduration FROM mdl_ytpltrack y LEFT JOIN `mdl_ytpltrack_views` v ON (y.id=v.instance) WHERE y.course=152 ORDER BY v.lastupdate DESC
     $return = new stdClass();
-    $return->time = 0;
-    $return->info = '';
+	global $DB;
+	$ytpltrackview = $DB->get_record('ytpltrack_views', array('instance' => $mod->instance, 'userid' => $user->id));
+    $return->time = $ytpltrackview->lastupdate;
+    $return->info = $user->firstname . ' ' . $user->lastname;
+	if ($ytpltrackview->lastupdate)
+	{
+		$return->info .= ' last viewed ';
+		$return->info .= date("d-M-Y H:i:s", $ytpltrackview->lastupdate);
+		if ($ytpltrackview->countfull == $ytpltrackview->countraw)
+		{
+			$return->info .= sprintf(" %d videos, %.1f%% complete", $ytpltrackview->countfull, 100.0 * $ytpltrackview->totalcapped / $ytpltrackview->totalduration );
+		}
+		else
+		{
+			$return->info .= sprintf( " %d/%d videos watched so far (%.1f minutes)", $ytpltrackview->countfull, $ytpltrackview->countraw, $ytpltrackview->totalviewed / 60.0 );
+		}
+	}
+	else
+	{
+		$return->info .=  ' has not started viewing';
+	}
     return $return;
 }
 
 /**
  * Prints a detailed representation of what a user has done with
  * a given particular instance of this module, for user activity reports.
+ * (Shown in user profile, reports, complete report)
  *
  * It is supposed to echo directly without returning a value.
  *
@@ -152,6 +183,33 @@ function ytpltrack_user_outline($course, $user, $mod, $ytpltrack) {
  * @param stdClass $ytpltrack the module instance record
  */
 function ytpltrack_user_complete($course, $user, $mod, $ytpltrack) {
+	global $DB;
+	$ytv = $DB->get_record('ytpltrack_views', array('instance' => $mod->instance, 'userid' => $user->id));
+	if ($ytv->lastupdate)
+	{
+		printf( "<p>%s %s last viewed %s</p>\n", $user->firstname, $user->lastname, date("d-M-Y H:i:s", $ytv->lastupdate) );
+	}
+	else
+	{
+		printf( "<p>%s %s has not viewed cm %d</p>\n", $user->firstname, $user->lastname, $mod->id );
+	}
+}
+
+/**
+ * Must return an array of user records (all data) who are participants
+ * for a given instance of ytpltrack.
+ *
+ * @param int $instanceid
+ * @return stdClass list of participants
+ */
+function ytpltrack_get_participants($instanceid) {
+    global $DB;
+
+    $sql = "SELECT DISTINCT u.id, u.id
+              FROM {user} u, {ytpltrack_views} v
+             WHERE v.instance = :instanceid
+               AND u.id = v.userid";
+    return  $DB->get_records_sql($sql, array('instanceid' => $instanceid));
 }
 
 /**
@@ -184,7 +242,166 @@ function ytpltrack_print_recent_activity($course, $viewfullnames, $timestart) {
  * @param int $userid check for a particular user's activity only, defaults to 0 (all users)
  * @param int $groupid check for a particular group's activity only, defaults to 0 (all groups)
  */
-function ytpltrack_get_recent_mod_activity(&$activities, &$index, $timestart, $courseid, $cmid, $userid=0, $groupid=0) {
+/**
+ * This function  returns activity for all readers in a course since a given time.
+ * It is initiated from the "Full report of recent activity" link in the "Recent Activity" block.
+ * Using the "Advanced Search" page (cousre/recent.php?id=99&advancedfilter=1),
+ * results may be restricted to a particular course module, user or group
+ *
+ * This function is called from: {@link course/recent.php}
+ *
+ * @param array(object) $activities sequentially indexed array of course module objects
+ * @param integer $index length of the $activities array
+ * @param integer $timestart start date, as a UNIX date
+ * @param integer $courseid id in the "course" table
+ * @param integer $coursemoduleid id in the "course_modules" table
+ * @param integer $userid id in the "users" table (default = 0)
+ * @param integer $groupid id in the "groups" table (default = 0)
+ * @return void adds items into $activities and increments $index
+ *     for each reader attempt, an $activity object is appended
+ *     to the $activities array and the $index is incremented
+ *     $activity->type : module type (always "reader")
+ *     $activity->defaultindex : index of this object in the $activities array
+ *     $activity->instance : id in the "reader" table;
+ *     $activity->name : name of this reader
+ *     $activity->section : section number in which this reader appears in the course
+ *     $activity->content : array(object) containing information about reader attempts to be printed by {@link print_recent_mod_activity()}
+ *         $activity->content->attemptid : id in the "reader_quiz_attempts" table
+ *         $activity->content->attempt : the number of this attempt at this quiz by this user
+ *         $activity->content->score : the score for this attempt
+ *         $activity->content->timestart : the server time at which this attempt started
+ *         $activity->content->timefinish : the server time at which this attempt finished
+ *     $activity->user : object containing user information
+ *         $activity->user->userid : id in the "user" table
+ *         $activity->user->fullname : the full name of the user (see {@link lib/moodlelib.php}::{@link fullname()})
+ *         $activity->user->picture : $record->picture;
+ *     $activity->timestamp : the time that the content was recorded in the database
+ */
+
+function ytpltrack_get_recent_mod_activity(&$activities, &$index, $timestart, $courseid, $coursemoduleid, $userid=0, $groupid=0) {
+    global $CFG, $DB, $USER;
+
+	/**
+    // Don't allow students to see each other's scores
+    $coursecontext = ytpltrack_get_context(CONTEXT_COURSE, $courseid);
+    if (! has_capability('mod/ytpltrack:viewbooks', $coursecontext)) {
+        return; // can't view recent activity
+    }
+    if (! has_capability('mod/ytpltrack:viewreports', $coursecontext)) {
+        $userid = $USER->id; // force this user only (e.g. student)
+    }
+	**/
+	$modinfo = get_fast_modinfo($courseid);
+	$course  = $modinfo->get_course();
+	$cms = $modinfo->get_cms();
+
+	// Build up a list of users and instances, and remove extraneous cms records
+    $readers = array(); // ytpltrack.id => cmid
+    $users   = array(); // cmid => array(userids)
+
+    foreach ($cms as $cmid => $cm) {
+        if ($cm->modname=='ytpltrack' && ($coursemoduleid==0 || $coursemoduleid==$cmid)) {
+            // save mapping from ytpltrack.id => coursemoduleid
+            $readers[$cm->instance] = $cmid;
+            // initialize array of users who have recently attempted this playlist viewer instance
+            $users[$cmid] = array();
+        } else {
+            // we are not interested in this mod
+            unset($cms[$cmid]);
+        }
+    }
+
+    if (class_exists('user_picture')) {
+        // Moodle >= 2.6
+        $userfields = user_picture::fields('u', null, 'useruserid');
+    } else {
+        // Moodle <= 2.5
+        $userfields ='u.firstname,u.lastname,u.picture,u.imagealt,u.email';
+    }
+
+    $select = 'yv.*, ' . $userfields;
+    $from   = '{ytpltrack_views} yv '.
+              'JOIN {user} u ON yv.userid = u.id ';
+    list($where, $params) = $DB->get_in_or_equal(array_keys($readers));
+    $where  = 'yv.instance ' . $where;
+    $order  = 'yv.userid, yv.instance';
+
+    if ($groupid) {
+        // restrict search to a users from a particular group
+        $from   .= ', {groups_members} gm';
+        $where  .= ' AND yv.userid = gm.userid AND gm.id = ?';
+        $params[] = $groupid;
+    }
+    if ($userid) {
+        // restrict search to a single user
+        $where .= ' AND yv.userid = ?';
+        $params[] = $userid;
+    }
+    if ($timestart) {
+        $where .= ' AND yv.lastupdate > ?';
+        $params[] = $timestart;
+    }
+
+    if (! $attempts = $DB->get_records_sql("SELECT $select FROM $from WHERE $where ORDER BY $order", $params)) {
+        return; // no recent viewing activity
+    }
+
+	// Clean up userfields into an array of actual {user} fields (no wildcards)
+    $userfields = str_replace('u.', '', $userfields);
+    $userfields = explode(',', $userfields);
+    $userfields = preg_grep('/^[a-z]+$/', $userfields);
+
+    foreach (array_keys($attempts) as $attemptid) {
+        $attempt = &$attempts[$attemptid];
+
+        if (! array_key_exists($attempt->instance, $readers)) {
+            continue; // invalid instance - shouldn't happen !!
+        }
+
+        $cmid = $readers[$attempt->instance];
+        $userid = $attempt->userid;
+        if (! array_key_exists($userid, $users[$cmid])) {
+            $users[$cmid][$userid] = (object)array(
+                'id' => $userid,
+                'userid' => $userid,
+                'views' => array()
+            );
+            foreach ($userfields as $userfield) {
+                $users[$cmid][$userid]->$userfield = $attempt->$userfield;
+            }
+        }
+        // add this view by this user at this course module
+        $users[$cmid][$userid]->views[$attempt->instance] = &$attempt;
+    }
+
+	// Finally, append to the array
+    foreach ($cms as $cmid => $cm) {
+        if (empty($users[$cmid])) {
+            continue;
+        }
+        // add an activity object for each user's view of this playlist instance
+        foreach ($users[$cmid] as $userid => $user) {
+
+            // get index of last (=most recent) attempt
+            $max_unumber = max(array_keys($user->views));
+
+            $options = array('context' => $cm->context);
+            if (method_exists($cm, 'get_formatted_name')) {
+                $name = $cm->get_formatted_name($options);
+            } else {
+                $name = format_string($cm->name, true,  $options);
+            }
+
+            $activities[$index++] = (object)array(
+                'type' => 'ytpltrack',
+                'cmid' => $cmid,
+                'name' => $name,
+                'user' => $user,
+                'views'  => $user->views,
+                'timestamp' => $user->views[$max_unumber]->lastupdate
+            );
+        }
+    } 
 }
 
 /**
@@ -197,6 +414,147 @@ function ytpltrack_get_recent_mod_activity(&$activities, &$index, $timestart, $c
  * @param bool $viewfullnames display users' full names
  */
 function ytpltrack_print_recent_mod_activity($activity, $courseid, $detail, $modnames, $viewfullnames) {
+    global $CFG, $OUTPUT;
+	
+    static $dateformat = null;
+    if (is_null($dateformat)) {
+        $dateformat = get_string('strftimerecentfull');
+    }
+
+    $table = new html_table();
+    $table->cellpadding = 3;
+    $table->cellspacing = 0;
+
+    if ($detail) {
+        $row = new html_table_row();
+
+        $cell = new html_table_cell('&nbsp;', array('width'=>15));
+        $row->cells[] = $cell;
+
+        // activity icon and link to activity
+        $src = $OUTPUT->pix_url('icon', $activity->type);
+        $img = html_writer::empty_tag('img', array('src'=>$src, 'class'=>'icon', 'alt'=>$activity->name));
+
+        // link to activity
+        $href = new moodle_url('/mod/ytpltrack/view.php', array('id' => $activity->cmid));
+        $link = html_writer::link($href, $activity->name);
+
+        $cell = new html_table_cell("$img $link");
+        $cell->colspan = 9;
+        $row->cells[] = $cell;
+
+        $table->data[] = $row;
+    }
+
+    $row = new html_table_row();
+
+    // set rowspan to (number of views) + 1
+    $rowspan = count($activity->views) + 1;
+
+    $cell = new html_table_cell('&nbsp;', array('width'=>15));
+    $cell->rowspan = $rowspan;
+    $row->cells[] = $cell;
+
+    $picture = $OUTPUT->user_picture($activity->user, array('courseid'=>$courseid));
+    $cell = new html_table_cell($picture, array('width'=>35, 'valign'=>'top', 'class'=>'forumpostpicture'));
+    $cell->rowspan = $rowspan;
+    $row->cells[] = $cell;
+
+    $href = new moodle_url('/user/view.php', array('id'=>$activity->user->userid, 'course'=>$courseid));
+    $cell = new html_table_cell(html_writer::link($href, fullname($activity->user)));
+    $cell->colspan = 8; // Match number of args passed to table row constructor below
+    $row->cells[] = $cell;
+
+    $table->data[] = $row;
+
+    foreach ($activity->views as $attempt) {
+        $duration = '&nbsp;';
+
+		// FIXME need to add reports!
+        $href = new moodle_url('/mod/ytpltrack/view.php', array('n'=>$attempt->instance, 'user' => $attempt->userid));
+        $link = html_writer::link($href, userdate($attempt->lastupdate, $dateformat));
+
+		/***
+        switch ($attempt->passed) {
+            case 'true':
+                $passed = get_string('passed', 'mod_reader');
+                $class = 'passed';
+                break;
+            case 'credit':
+                $passed = get_string('credit', 'mod_reader');
+                $class = 'passed';
+                break;
+            case 'credit':
+            default:
+                $passed = get_string('failed', 'mod_reader');
+                $class = 'failed';
+        }
+		***/
+		$passed = "n/a";
+        $passed = html_writer::tag('span', $passed, array('class' => $class));
+
+        //$readinglevel = get_string('readinglevelshort', 'mod_reader', $attempt->difficulty);
+		$readinglevel = "n/a";
+
+		if ($attempt->countfull >= $attempt->countraw)
+		{
+			$percentage = sprintf("%.1f%%", $attempt->totalcapped * 100.0 / $attempt->totalduration );
+			$watched = $attempt->countfull;
+		}
+		else
+		{
+			$percentage = "n/a";
+			$watched = sprintf( "%d/%d", $attempt->countfull, $attempt->countraw );
+		}
+        $table->data[] = new html_table_row(array(
+            new html_table_cell($watched . " watched"),
+            new html_table_cell($percentage),
+            new html_table_cell($attempt->totalviewed),
+            new html_table_cell($attempt->totalduration),
+            new html_table_cell($link)
+        ));
+    }
+    echo html_writer::table($table);
+}
+
+/*
+ * For the given list of courses, this function creates an HTML report
+ * of which Reader activities have been completed and which have not
+
+ * This function is called from: {@link course/lib.php}
+ *
+ * @param array(object) $courses records from the "course" table
+ * @param array(array(string)) $htmlarray array, indexed by courseid, of arrays, indexed by module name (e,g, "reader), of HTML strings
+ *     each HTML string shows a list of the following information about each open Reader in the course
+ *         Reader name and link to the activity  + open/close dates, if any
+ *             for teachers:
+ *                 how many students have attempted/completed the Reader
+ *             for students:
+ *                 which Readers have been completed
+ *                 which Readers have not been completed yet
+ *                 the time remaining for incomplete Readers
+ * @return no return value is required, but $htmlarray may be updated
+ */
+function ytpltrack_print_overview($courses, &$htmlarray) {
+    global $CFG, $DB, $USER;
+    if (! isset($courses) || ! is_array($courses) || ! count($courses)) {
+        return; // no courses
+    }
+
+    if (! $readers = get_all_instances_in_courses('ytpltrack', $courses)) {
+        return; // no ytpltrack instances
+    }
+
+    $str = null;
+    $now = time();
+    foreach ($readers as $reader) {
+		$html = "<div>" . print_r( $reader, TRUE ) . "</div>";
+        if (empty($htmlarray[$reader->course]['ytpltrack'])) {
+            $htmlarray[$reader->course]['ytpltrack'] = $html;
+        } else {
+            $htmlarray[$reader->course]['ytpltrack'] .= $html;
+        }
+	}
 }
 
 /**
@@ -425,3 +783,19 @@ function ytpltrack_extend_navigation(navigation_node $navref, stdClass $course, 
 function ytpltrack_extend_settings_navigation(settings_navigation $settingsnav, navigation_node $newmodulenode=null) {
     // TODO Delete this function and its docblock, or implement it.
 }
+
+/**
+ * ytpltrack_get_grades
+ *
+ * @uses $CFG
+ * @uses $DB
+ * @param xxx $ytpltrack
+ * @param xxx $userid (optional, default=0)
+ * @return xxx
+ * @todo Finish documenting this function. See mod/reader for example.
+ */
+function ytpltrack_get_grades($ytpltrack, $userid=0) {
+    global $DB;
+	return array();
+}
+

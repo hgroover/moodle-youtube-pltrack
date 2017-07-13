@@ -14,8 +14,11 @@
 require_once(dirname(dirname(dirname(__FILE__))).'/config.php');
 require_once(dirname(__FILE__).'/lib.php');
 
+global $USER, $CFG, $DB;
+
 $id = optional_param('id', 0, PARAM_INT); // Course_module ID, or
 $n  = optional_param('n', 0, PARAM_INT);  // ... ytpltrack instance ID - it should be named as the first character of the module. (?translation needed)
+$ufilter = optional_param('user', 0, PARAM_INT); // Optional user filter
 
 if ($id) {
     $cm         = get_coursemodule_from_id('ytpltrack', $id, 0, false, MUST_EXIST);
@@ -27,26 +30,35 @@ if ($id) {
     $ytpltrack  = $DB->get_record('ytpltrack', array('id' => $n), '*', MUST_EXIST);
     $course     = $DB->get_record('course', array('id' => $ytpltrack->course), '*', MUST_EXIST);
     $cm         = get_coursemodule_from_instance('ytpltrack', $ytpltrack->id, $course->id, false, MUST_EXIST);
-	//printf( "<!-- n = %s cm = %s course = %s ytpltrack = %s -->", $n, print_r($cm, TRUE), print_r($course, TRUE), print_r($ytpltrack, TRUE) );
+	printf( "<!-- n = %s cm = %s course = %s ytpltrack = %s -->", $n, print_r($cm, TRUE), print_r($course, TRUE), print_r($ytpltrack, TRUE) );
 } else {
     error('You must specify a course_module ID or an instance ID');
 }
 
 require_login($course, true, $cm);
 
-/*
-$event = \mod_newmodule\event\course_module_viewed::create(array(
-    'objectid' => $PAGE->cm->instance,
-    'context' => $PAGE->context,
-));
-$event->add_record_snapshot('course', $PAGE->course);
-$event->add_record_snapshot($PAGE->cm->modname, $newmodule);
-$event->trigger();
-*/
+// $ufilter requires special permission if other than self
+if ($ufilter && $ufilter != $USER->id)
+{
+	// Check for permission else force $ufilter to self
+}
+
+if (!$ufilter)
+{
+	$event = \mod_ytpltrack\event\course_module_viewed::create(array(
+		'objectid' => $PAGE->cm->instance,
+		'context' => $PAGE->context,
+	));
+	$event->add_record_snapshot('course', $PAGE->course);
+	$event->add_record_snapshot($PAGE->cm->modname, $ytpltrack);
+	$event->trigger();
+}
 
 // Print the page header.
 
-$PAGE->set_url('/mod/ytpltrak/view.php', array('id' => $cm->id));
+$page_params = array('id' => $cm->id);
+if ($ufilter) $page_params['user'] = $ufilter;
+$PAGE->set_url('/mod/ytpltrak/view.php', $page_params);
 $PAGE->set_title(format_string($ytpltrack->name));
 $PAGE->set_heading(format_string($course->fullname));
 
@@ -67,9 +79,9 @@ if ($ytpltrack->intro) {
 }
 
 //echo $OUTPUT->heading('Viewing playlist ' . $ytpltrack->playlist);
-global $USER;
 $instanceid = $ytpltrack->id;
 $userid = $USER->id;
+if ($ufilter) $userid = $ufilter;
 $playlist = $ytpltrack->playlist;
 $autoplay = 0; // Do not immediately begin playing
 $fullurl = 0; // Submit full URLs instead of just video IDs
@@ -81,7 +93,7 @@ $debug = 0;
     <div id="player"></div>
 	<div id="stats" style="font-size:8pt;"><?php
 	// Summarize existing stats, if any
-	$yviews = $DB->get_records_sql( "SELECT * FROM mdl_ytpltrack_views WHERE instance = :instance AND userid = :uid", array( "instance" => $instanceid, "uid" => $USER->id ) );
+	$yviews = $DB->get_records_sql( "SELECT * FROM {ytpltrack_views} WHERE instance = :instance AND userid = :uid", array( "instance" => $instanceid, "uid" => $userid ) );
 	// These will be used later to initialize Javascript
 	global $yvdetails, $fk;
 	$yvdetails = array();
@@ -96,6 +108,7 @@ $debug = 0;
 		//flush();
 		$fk = array_keys($yviews)[0];
 		// Do not display total progress unless all have been loaded
+		if ($ufilter && $ufilter != $USER->id) printf( "<h3>User %d</h3>", $ufilter );
 		if ($yviews[$fk]->countfull >= $yviews[$fk]->countraw)
 		{
 			printf( "<p>Viewed %s of %s (%.1f%%) in %d/%d videos</p>", SecondsToHMS($yviews[$fk]->totalcapped), SecondsToHMS($yviews[$fk]->totalduration), 
@@ -106,7 +119,7 @@ $debug = 0;
 			printf( "<p>Viewed %s so far in %d/%d videos</p>", SecondsToHMS($yviews[$fk]->totalcapped), $yviews[$fk]->countfull, $yviews[$fk]->countraw );
 		}
 		$viewid = $fk;
-		$yvdetails = $DB->get_records_sql( "SELECT * FROM mdl_ytpltrack_viewdetails WHERE viewid = :viewid ORDER BY id", array( "viewid" => $viewid ) );
+		$yvdetails = $DB->get_records_sql( "SELECT * FROM {ytpltrack_viewdetails} WHERE viewid = :viewid ORDER BY id", array( "viewid" => $viewid ) );
 		if (sizeof($yvdetails) > 0)
 		{
 			// Replicate Javascript updateStats()
@@ -117,8 +130,8 @@ $debug = 0;
 				$key = array_keys($yvdetails)[$n];
 				printf( "<tr><td>%d</td>", $n + 1 );
 				printf( "<td>%s</td>", $yvdetails[$key]->videoid );
-				printf( "<td>%s</td>", SecondsToHMS($yvdetails[$key]->duration) );
-				printf( "<td>%s</td>", SecondsToHMS($yvdetails[$key]->viewed) );
+				printf( "<td style='text-align:right;'>%s</td>", SecondsToHMS($yvdetails[$key]->duration) );
+				printf( "<td style='text-align:right;'>%s</td>", SecondsToHMS($yvdetails[$key]->viewed) );
 				if ($yvdetails[$key]->duration > 0)
 				{
 					printf( "<td>%.1f%%</td>", 100 * $yvdetails[$key]->viewed / $yvdetails[$key]->duration );
@@ -150,7 +163,9 @@ $debug = 0;
 
       tag.src = "https://www.youtube.com/iframe_api";
       var firstScriptTag = document.getElementsByTagName('script')[0];
+	  <?php if (!$ufilter) { ?>
       firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+	  <?php } ?>
 
       // 3. This function creates an <iframe> (and YouTube player)
       //    after the API code downloads.
@@ -328,7 +343,7 @@ $debug = 0;
 			  s += idfromurl(playlistUrl[n]);
 			  s += "</a>";
 			  s += "</td>";
-			  s += "<td>";
+			  s += "<td style='text-align:right;'>";
 			  //s += playlistDuration[n];
 			  s += SecondsToHMS( playlistDuration[n] );
 			  s += "</td>";
@@ -364,7 +379,7 @@ $debug = 0;
 				totalPlayedMS += (playlistTimes[n][m] + endTime);
 			  }
 			  postData += (totalPlayedMS/1000.0).toFixed(3);
-			  s += "<td>";
+			  s += "<td style='text-align:right;'>";
 			  if (g_dbg > 1) logmsg(sDbg);
 			  //s += (totalPlayedMS/1000.0);
 			  s += SecondsToHMS( totalPlayedMS/1000 );
@@ -483,6 +498,7 @@ $debug = 0;
 	  {
 		  var minutes = Math.floor(Math.round(nseconds) / 60);
 		  var hours = Math.floor(minutes / 60);
+		  minutes = minutes % 60;
 		  var seconds = Math.round(nseconds) % 60;
 		  var s = '';
 		  if (hours > 0)
@@ -507,6 +523,7 @@ function SecondsToHMS( $nseconds )
 {
 	$minutes = ((int)$nseconds) / 60;
 	$hours = $minutes / 60;
+	$minutes = $minutes % 60;
 	$seconds = $nseconds % 60;
 	if ($hours == 0)
 	{

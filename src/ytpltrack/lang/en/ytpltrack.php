@@ -26,3 +26,6 @@ $string['ytpltrackname'] = 'Name of playlist';
 $string['ytpltrackname_help'] = 'Name to use for playlist. This will be displayed during playback.';
 $string['ytpltrack'] = 'ytpltrack';
 $string['pluginadministration'] = 'ytpltrack administration';
+
+// String formats
+$string['strftimerecentfull'] = "d-M-Y H:i:s";
