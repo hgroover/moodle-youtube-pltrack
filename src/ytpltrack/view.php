@@ -41,6 +41,11 @@ require_login($course, true, $cm);
 if ($ufilter && $ufilter != $USER->id)
 {
 	// Check for permission else force $ufilter to self
+	$userdata = $DB->get_record('user', array('id' => $ufilter), '*', MUST_EXIST);
+}
+else
+{
+	$userdata = $USER;
 }
 
 if (!$ufilter)
@@ -108,7 +113,7 @@ $debug = 0;
 		//flush();
 		$fk = array_keys($yviews)[0];
 		// Do not display total progress unless all have been loaded
-		if ($ufilter && $ufilter != $USER->id) printf( "<h3>User %d</h3>", $ufilter );
+		if ($ufilter && $ufilter != $USER->id) printf( "<h3>User %d (%s %s)</h3>", $ufilter, $userdata->firstname, $userdata->lastname );
 		if ($yviews[$fk]->countfull >= $yviews[$fk]->countraw)
 		{
 			printf( "<p>Viewed %s of %s (%.1f%%) in %d/%d videos</p>", SecondsToHMS($yviews[$fk]->totalcapped), SecondsToHMS($yviews[$fk]->totalduration), 
