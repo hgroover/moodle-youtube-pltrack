@@ -27,7 +27,7 @@
  
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2017071102;
+$plugin->version   = 2017090803;
 $plugin->requires  = 2014111000; // Moodle 2.8 - tested with 3.1 (2016052300)
 $plugin->cron      = 0;
 $plugin->component = 'mod_ytpltrack';

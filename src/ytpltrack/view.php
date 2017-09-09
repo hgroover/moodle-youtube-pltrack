@@ -63,7 +63,7 @@ if (!$ufilter)
 
 $page_params = array('id' => $cm->id);
 if ($ufilter) $page_params['user'] = $ufilter;
-$PAGE->set_url('/mod/ytpltrak/view.php', $page_params);
+$PAGE->set_url('/mod/ytpltrack/view.php', $page_params);
 $PAGE->set_title(format_string($ytpltrack->name));
 $PAGE->set_heading(format_string($course->fullname));
 
